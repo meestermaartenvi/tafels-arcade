@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Arcade Battle: Meester Maarten</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/tone@14.7.58/build/Tone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Orbitron:wght@400;700&family=Inter:wght@400;700&display=swap');
+        
+        html, body {
+            margin: 0; padding: 0; height: 100%; width: 100%;
+            overflow-x: hidden; overflow-y: auto;
+            font-family: 'Inter', sans-serif;
+            background-color: #020617;
+            background-image: radial-gradient(circle at center, #1e1b4b 0%, #020617 100%);
+        }
+        
+        body { display: flex; justify-content: center; align-items: flex-start; padding: 10px; }
+        
+        #game-container { width: 100%; max-width: 600px; position: relative; margin-top: 10px; }
+
+        .arcade-title {
+            font-family: 'Press Start 2P', cursive;
+            line-height: 1.4; color: #facc15;
+            text-shadow: 0 0 8px rgba(250, 204, 21, 0.4), 2px 2px #1e40af;
+            font-size: 0.7rem; margin-bottom: 1rem;
+        }
+
+        .game-area {
+            position: relative; height: 400px; overflow: hidden;
+            background: rgba(30, 27, 75, 0.8); border-radius: 1.25rem;
+            box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.9), 0 0 15px rgba(99, 102, 241, 0.3);
+            border: 3px solid #6366f1; backdrop-filter: blur(5px);
+        }
+
+        .answer-button {
+            position: absolute; width: 20%; min-width: 70px; padding: 0.75rem 0;
+            transform: translateX(-50%); border-radius: 12px; font-size: 1.4rem; 
+            font-weight: bold; color: white; transition: transform 0.1s;
+            cursor: pointer; user-select: none; border: 2px solid rgba(255,255,255,0.2);
+            box-shadow: 0 4px 0 rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center;
+        }
+
+        .room-card {
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .room-card:hover:not(.disabled) {
+            transform: translateY(-2px);
+            border-color: #facc15;
+        }
+        .room-card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #facc15;
+            border-radius: 50%; width: 30px; height: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="p-2">
+
+    <div id="game-container" class="w-full bg-slate-900 p-3 md:p-6 rounded-3xl border-4 border-indigo-500 shadow-2xl relative text-white">
+        
+        <h1 class="arcade-title text-center uppercase">Tafels Arcade<br>MULTIPLAYER BATTLE</h1>
+        
+        <!-- Naam invoeren -->
+        <div id="name-screen" class="space-y-6 py-4">
+            <div class="bg-slate-800 p-6 rounded-2xl border border-indigo-500/30 text-center">
+                <p class="text-indigo-300 text-sm mb-4">Welkom! Wat is je naam?</p>
+                <input id="user-name-input" type="text" placeholder="Jouw Naam" maxlength="12" class="w-full p-4 bg-slate-900 border border-indigo-500 rounded-xl text-center text-xl font-bold text-yellow-400 mb-4 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                <button id="save-name-btn" class="w-full p-4 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold uppercase tracking-widest transition-all">Verder</button>
+            </div>
+            <div id="auth-status" class="text-center text-[10px] text-slate-500 mt-2">Systeem wordt geladen...</div>
+        </div>
+
+        <!-- Kamer selecteren -->
+        <div id="room-screen" class="hidden space-y-4 py-4">
+            <div class="text-center mb-4">
+                <h2 class="text-xl font-bold text-yellow-400">Kies een kamer</h2>
+                <p class="text-xs text-indigo-300">Zoek een vrije plek!</p>
+                <div id="online-status" class="text-[9px] text-slate-500 mt-1">Verbinding maken...</div>
+            </div>
+            <div id="rooms-grid" class="grid grid-cols-2 gap-3">
+                <!-- Kamers worden hier geladen -->
+            </div>
+        </div>
+
+        <!-- Wachten op speler -->
+        <div id="waiting-screen" class="hidden text-center py-10 space-y-6">
+            <div class="flex justify-center"><div class="loading-spinner"></div></div>
+            <h2 class="text-xl font-bold">Wachten in <span id="wait-room-name" class="text-yellow-400"></span>...</h2>
+            <p id="wait-msg" class="text-slate-400 text-sm italic">Wachten tot een klasgenoot de kamer binnenkomt.</p>
+            <button id="leave-room-btn" class="text-xs text-rose-400 underline">Kies andere kamer</button>
+        </div>
+
+        <!-- Speelscherm -->
+        <div id="game-screen" class="hidden space-y-3">
+            <div class="grid grid-cols-2 gap-2 mb-2">
+                <div id="p1-panel" class="p-2 bg-slate-800 rounded-xl border-2 border-indigo-500">
+                    <p id="p1-name-label" class="text-[10px] text-indigo-300 uppercase truncate">Speler 1</p>
+                    <p id="p1-score" class="text-2xl font-black">0</p>
+                    <div id="p1-lives" class="flex text-xs"></div>
+                </div>
+                <div id="p2-panel" class="p-2 bg-slate-800 rounded-xl border-2 border-slate-700">
+                    <p id="p2-name-label" class="text-[10px] text-rose-300 uppercase truncate">Speler 2</p>
+                    <p id="p2-score" class="text-2xl font-black">0</p>
+                    <div id="p2-lives" class="flex text-xs"></div>
+                </div>
+            </div>
+
+            <div class="relative py-4 px-3 bg-indigo-950 rounded-xl border border-indigo-400/40 text-center">
+                <p class="text-4xl font-black text-yellow-400 font-mono" id="som-display">? × ? = ?</p>
+            </div>
+
+            <div id="game-area" class="game-area"></div>
+        </div>
+
+        <!-- Resultaat -->
+        <div id="result-screen" class="hidden text-center py-6 space-y-6">
+            <h2 id="result-title" class="arcade-title text-2xl">GEWONNEN!</h2>
+            <div class="bg-slate-800 p-6 rounded-2xl border-2 border-yellow-500">
+                <p class="text-slate-400 uppercase text-xs">Eindstand</p>
+                <p id="final-score-text" class="text-2xl font-black"></p>
+            </div>
+            <button onclick="location.reload()" class="w-full p-4 bg-indigo-600 rounded-xl font-bold uppercase">Terug naar menu</button>
+        </div>
+
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase configuratie
+        const firebaseConfig = { apikey: "AlzaSyCfkIhQDzLCuMoi5vKPq05RC1sRveyYNtA", authDomain: "tafels-arcade-klas.firebaseapp.com", projectId: "tafels-arcade-klas", storageBucket: "tafels-arcade-klas.firebasestorage.app", messagingSenderId: 428924701821", appId: "1:428924701821:web: @ca45117ed9b6ef820b514", measurementId: "G-PXD74QB2NM"
+};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'tafel-arcade-v2';
+
+        let user = null;
+        let userName = "";
+        let currentRoomId = null;
+        let role = ""; 
+        let gameActive = false;
+        
+        let localScore = 0;
+        let localLives = 5;
+        let currentCorrectAnswer = 0;
+        let speed = 0.5;
+        let currentAnswers = [];
+        let unsubscribeRoom = null;
+        let unsubscribeRoomsList = null;
+
+        const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+        synth.volume.value = -20;
+
+        // UI Helpers
+        const showScreen = (id) => {
+            ['name-screen', 'room-screen', 'waiting-screen', 'game-screen', 'result-screen'].forEach(s => {
+                document.getElementById(s).classList.add('hidden');
+            });
+            document.getElementById(id).classList.remove('hidden');
+        };
+
+        // --- AUTHENTICATIE ---
+        async function initAuth() {
+            const statusEl = document.getElementById('auth-status');
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                statusEl.textContent = "Systeem gereed";
+            } catch (error) {
+                console.error("Auth Error:", error);
+                statusEl.textContent = "Verbindingsfout, even geduld...";
+                setTimeout(initAuth, 2000);
+            }
+        }
+
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (u && userName) startRoomListener();
+        });
+
+        initAuth();
+
+        // --- EVENTS ---
+        document.getElementById('save-name-btn').addEventListener('click', () => {
+            const input = document.getElementById('user-name-input').value.trim();
+            if (!input) return;
+            userName = input;
+            showScreen('room-screen');
+            startRoomListener();
+        });
+
+        document.getElementById('leave-room-btn').addEventListener('click', leaveRoom);
+
+        // --- KAMER LOGICA ---
+        function startRoomListener() {
+            if (!user) return;
+            if (unsubscribeRoomsList) unsubscribeRoomsList();
+            
+            const roomsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'rooms');
+            
+            unsubscribeRoomsList = onSnapshot(roomsCollection, (snap) => {
+                const roomData = {};
+                snap.forEach(doc => roomData[doc.id] = doc.data());
+                renderRooms(roomData);
+                document.getElementById('online-status').textContent = "Verbonden - Live updates actief";
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                document.getElementById('online-status').textContent = "Database fout, probeer opnieuw...";
+            });
+        }
+
+        function renderRooms(liveData = {}) {
+            const grid = document.getElementById('rooms-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            
+            for (let i = 1; i <= 8; i++) {
+                const rId = `KAMER-${i}`;
+                const data = liveData[rId] || { status: 'empty', p1_name: 'Vrij', p2_name: 'Vrij' };
+                
+                let occupantCount = 0;
+                if (data.p1) occupantCount++;
+                if (data.p2) occupantCount++;
+
+                const card = document.createElement('div');
+                card.className = `room-card p-3 rounded-xl border-2 bg-slate-800 flex flex-col items-center ${occupantCount >= 2 ? 'disabled border-slate-700' : 'border-indigo-500'}`;
+                card.innerHTML = `
+                    <span class="text-[10px] font-bold text-indigo-400">KAMER ${i}</span>
+                    <span class="text-sm font-bold text-white my-1">${occupantCount}/2 Spelers</span>
+                    <div class="text-[9px] text-slate-400 truncate w-full text-center">
+                        ${data.p1_name || 'Vrij'} & ${data.p2_name || 'Vrij'}
+                    </div>
+                `;
+                if (occupantCount < 2) {
+                    card.onclick = () => joinRoom(rId);
+                }
+                grid.appendChild(card);
+            }
+        }
+
+        async function joinRoom(roomId) {
+            if (!user) return;
+            currentRoomId = roomId;
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+            
+            try {
+                const snap = await getDoc(roomRef);
+                const data = snap.exists() ? snap.data() : null;
+
+                if (!data || !data.p1 || data.status === 'empty' || data.status === 'finished') {
+                    role = 'p1';
+                    await setDoc(roomRef, {
+                        p1: user.uid, p1_name: userName,
+                        p2: null, p2_name: 'Vrij',
+                        scoreP1: 0, scoreP2: 0,
+                        livesP1: 5, livesP2: 5,
+                        status: 'waiting', lastUpdate: Date.now()
+                    });
+                } else {
+                    role = 'p2';
+                    await updateDoc(roomRef, {
+                        p2: user.uid, p2_name: userName,
+                        status: 'playing', lastUpdate: Date.now()
+                    });
+                }
+
+                showScreen('waiting-screen');
+                document.getElementById('wait-room-name').textContent = roomId;
+                listenToCurrentRoom();
+            } catch (error) {
+                console.error("Join error:", error);
+            }
+        }
+
+        function listenToCurrentRoom() {
+            if (!currentRoomId) return;
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', currentRoomId);
+            if (unsubscribeRoom) unsubscribeRoom();
+            
+            unsubscribeRoom = onSnapshot(roomRef, (snap) => {
+                if (!snap.exists()) return;
+                const data = snap.data();
+                
+                document.getElementById('p1-name-label').textContent = data.p1_name;
+                document.getElementById('p2-name-label').textContent = data.p2_name;
+                document.getElementById('p1-score').textContent = data.scoreP1;
+                document.getElementById('p2-score').textContent = data.scoreP2;
+                renderLivesDisplay('p1-lives', data.livesP1);
+                renderLivesDisplay('p2-lives', data.livesP2);
+
+                if (data.status === 'playing' && !gameActive) {
+                    showScreen('game-screen');
+                    startGame();
+                }
+
+                if (data.status === 'finished') {
+                    endGame(data);
+                }
+            }, (err) => console.error("Room sync error:", err));
+        }
+
+        async function leaveRoom() {
+            if (unsubscribeRoom) unsubscribeRoom();
+            if (currentRoomId) {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', currentRoomId);
+                try {
+                    const snap = await getDoc(roomRef);
+                    if (snap.exists()) {
+                        const data = snap.exists() ? snap.data() : {};
+                        if (role === 'p1') {
+                            await updateDoc(roomRef, { p1: null, p1_name: 'Vrij', status: 'empty' });
+                        } else {
+                            await updateDoc(roomRef, { p2: null, p2_name: 'Vrij', status: data.p1 ? 'waiting' : 'empty' });
+                        }
+                    }
+                } catch (e) {}
+            }
+            showScreen('room-screen');
+        }
+
+        function renderLivesDisplay(id, count) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = '';
+            for(let i=0; i<5; i++) el.innerHTML += i < count ? '❤️' : '🖤';
+        }
+
+        // --- GAMEPLAY ---
+        function startGame() {
+            gameActive = true;
+            localScore = 0; localLives = 5; speed = 0.5;
+            makeNewSum();
+            requestAnimationFrame(gameLoop);
+        }
+
+        async function updateStats() {
+            if (!currentRoomId || !user) return;
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', currentRoomId);
+            const update = role === 'p1' 
+                ? { scoreP1: localScore, livesP1: localLives } 
+                : { scoreP2: localScore, livesP2: localLives };
+            
+            try {
+                await updateDoc(roomRef, update);
+                if (localScore >= 30) await updateDoc(roomRef, { status: 'finished', winner: role });
+                else if (localLives <= 0) await updateDoc(roomRef, { status: 'finished', winner: role === 'p1' ? 'p2' : 'p1' });
+            } catch (e) {}
+        }
+
+        function makeNewSum() {
+            const area = document.getElementById('game-area');
+            area.querySelectorAll('.answer-button').forEach(b => b.remove());
+            currentAnswers = [];
+
+            const t1 = Math.floor(Math.random() * 10) + 1;
+            const t2 = Math.floor(Math.random() * 10) + 1;
+            currentCorrectAnswer = t1 * t2;
+            document.getElementById('som-display').textContent = `${t1} × ${t2} = ?`;
+
+            const options = new Set([currentCorrectAnswer]);
+            while(options.size < 4) {
+                let w = currentCorrectAnswer + (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random()*5)+1);
+                if(w >= 0 && w !== currentCorrectAnswer) options.add(w);
+            }
+
+            const colors = ['bg-indigo-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500'];
+            Array.from(options).sort(() => Math.random() - 0.5).forEach((val, i) => {
+                const btn = document.createElement('button');
+                btn.textContent = val;
+                btn.className = `answer-button ${colors[i]}`;
+                btn.style.left = `${(area.offsetWidth / 5) * (i + 1)}px`;
+                btn.style.top = `${area.offsetHeight}px`;
+                btn.onclick = () => (val === currentCorrectAnswer) ? onCorrect() : onWrong();
+                area.appendChild(btn);
+                currentAnswers.push({ el: btn, val, y: area.offsetHeight, isCorrect: val === currentCorrectAnswer });
+            });
+        }
+
+        function onCorrect() {
+            localScore++; speed += 0.015;
+            synth.triggerAttackRelease(["C4", "E4", "G4"], "16n");
+            updateStats();
+            makeNewSum();
+        }
+
+        function onWrong() {
+            localLives--;
+            synth.triggerAttackRelease("F2", "8n");
+            updateStats();
+            if (localLives > 0) makeNewSum();
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            const area = document.getElementById('game-area');
+            let missed = false;
+            
+            for (let i = currentAnswers.length - 1; i >= 0; i--) {
+                const ans = currentAnswers[i];
+                ans.y -= speed;
+                ans.el.style.top = `${ans.y}px`;
+                if (ans.y < -50) {
+                    if (ans.isCorrect) missed = true;
+                    ans.el.remove();
+                    currentAnswers.splice(i, 1);
+                }
+            }
+
+            if (missed) onWrong();
+            if (localLives > 0 && gameActive) requestAnimationFrame(gameLoop);
+        }
+
+        function endGame(data) {
+            gameActive = false;
+            showScreen('result-screen');
+            const win = data.winner === role;
+            document.getElementById('result-title').textContent = win ? "GEWONNEN!" : "VERLOREN...";
+            document.getElementById('result-title').style.color = win ? "#facc15" : "#ef4444";
+            document.getElementById('final-score-text').textContent = `${data.p1_name}: ${data.scoreP1} - ${data.p2_name}: ${data.scoreP2}`;
+            if (win) confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+        }
+    </script>
+</body>
+</html>
